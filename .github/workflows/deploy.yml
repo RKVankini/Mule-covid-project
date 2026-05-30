@@ -1,4 +1,4 @@
-name: MuleSoft CloudHub 2.0 Deployment
+name: Deploy Mule App to CloudHub 2.0
 
 on:
   push:
@@ -6,14 +6,12 @@ on:
       - main
 
 jobs:
-
   deploy:
 
     runs-on: ubuntu-latest
 
     steps:
-
-      - name: Checkout Code
+      - name: Checkout Source
         uses: actions/checkout@v4
 
       - name: Setup Java
@@ -22,7 +20,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Build Mule App
+      - name: Build Application
         run: mvn clean package
 
       - name: Deploy to CloudHub 2.0
