@@ -534,7 +534,7 @@ payload
 
                 <fixed-frequency
                         frequency="1"
-                        timeUnit="MINUTES"/>
+                        timeUnit="DAYS"/>
 
             </scheduling-strategy>
 
