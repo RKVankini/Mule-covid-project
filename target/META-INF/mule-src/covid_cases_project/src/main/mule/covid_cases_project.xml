@@ -1,0 +1,569 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd 
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd 
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd 
+      http://www.mulesoft.org/schema/mule/core
+      http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+
+      http://www.mulesoft.org/schema/mule/http
+      http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+
+      http://www.mulesoft.org/schema/mule/db
+      http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+
+      http://www.mulesoft.org/schema/mule/ee/core
+      http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================= -->
+    <!-- HTTP CONFIG -->
+    <!-- ========================================= -->
+
+    <http:listener-config name="HTTP_Listener_config"
+                          doc:name="HTTP Listener Config">
+
+        <http:listener-connection
+                host="0.0.0.0"
+                port="8081"/>
+    </http:listener-config>
+
+
+    <!-- ========================================= -->
+    <!-- DATABASE CONFIG -->
+    <!-- ========================================= -->
+
+    <db:config name="MySQL_Config"
+               doc:name="MySQL Config">
+
+        <db:my-sql-connection
+                host="localhost"
+                port="3306"
+                user="root"
+                password="Root@123"
+                database="pradeep_management"/>
+    </db:config>
+
+
+    <!-- ========================================= -->
+    <!-- MAIN FLOW -->
+    <!-- ========================================= -->
+
+    <flow name="covid-management-main-flow">
+
+        <http:listener
+                doc:name="HTTP Listener"
+                config-ref="HTTP_Listener_config"
+                path="/api/*"/>
+
+        <logger level="INFO"
+                message="COVID Management API Triggered"/>
+
+    </flow>
+
+
+    <!-- ========================================= -->
+    <!-- REGISTER PATIENT FLOW -->
+    <!-- ========================================= -->
+
+    <flow name="register-patient-flow">
+
+        <http:listener
+                config-ref="HTTP_Listener_config"
+                path="/patients/register"
+                allowedMethods="POST"/>
+
+        <logger level="INFO"
+                message="Register Patient Flow Started"/>
+
+        <!-- STORE PAYLOAD -->
+
+        <set-variable variableName="patientData"
+                      value="#[payload]"/>
+
+        <!-- CHECK EXISTING PATIENT -->
+
+        <db:select doc:name="Check Existing Patient"
+                   config-ref="MySQL_Config">
+
+            <db:sql><![CDATA[
+                SELECT *
+                FROM patients
+                WHERE phone = :phone
+            ]]></db:sql>
+
+            <db:input-parameters><![CDATA[
+                #[
+                  {
+                    phone: vars.patientData.phone
+                  }
+                ]
+            ]]></db:input-parameters>
+
+        </db:select>
+
+
+        <!-- CHOICE -->
+		<choice doc:name="Patient Exists or Not">
+
+            <!-- EXISTING -->
+
+            <when expression="#[sizeOf(payload) > 0]">
+
+                <ee:transform doc:name="Existing Response">
+
+                    <ee:message>
+
+                        <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status : "FAILED",
+    message : "Patient Already Registered"
+}
+]]></ee:set-payload>
+
+                    </ee:message>
+
+                </ee:transform>
+
+            </when>
+
+
+            <!-- NEW PATIENT -->
+
+            <otherwise>
+
+                <db:insert doc:name="Insert Patient"
+                           config-ref="MySQL_Config">
+
+                    <db:sql><![CDATA[
+                        INSERT INTO patients
+                        (
+                            first_name,
+                            last_name,
+                            gender,
+                            age,
+                            phone,
+                            city,
+                            state,
+                            covid_status,
+                            admission_date
+                        )
+
+                        VALUES
+                        (
+                            :firstName,
+                            :lastName,
+                            :gender,
+                            :age,
+                            :phone,
+                            :city,
+                            :state,
+                            'POSITIVE',
+                            CURDATE()
+                        )
+                    ]]></db:sql>
+
+                    <db:input-parameters><![CDATA[
+                        #[
+                          {
+                            firstName : vars.patientData.firstName,
+                            lastName  : vars.patientData.lastName,
+                            gender    : vars.patientData.gender,
+                            age       : vars.patientData.age,
+                            phone     : vars.patientData.phone,
+                            city      : vars.patientData.city,
+                            state     : vars.patientData.state
+                          }
+                        ]
+                    ]]></db:input-parameters>
+
+                </db:insert>
+
+
+                <ee:transform doc:name="Success Response">
+
+                    <ee:message>
+
+                        <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status : "SUCCESS",
+    message : "Patient Registered Successfully"
+}
+]]></ee:set-payload>
+
+                    </ee:message>
+
+                </ee:transform>
+
+            </otherwise>
+
+        </choice>
+
+    </flow>
+
+
+    <!-- ========================================= -->
+    <!-- UPDATE PATIENT STATUS -->
+    <!-- ========================================= -->
+
+    <flow name="update-patient-status-flow">
+
+        <http:listener
+                config-ref="HTTP_Listener_config"
+                path="/patients/status"
+                allowedMethods="PUT"/>
+
+        <logger level="INFO"
+                message="Update Status Flow Started"/>
+
+        <set-variable variableName="statusData"
+                      value="#[payload]"/>
+
+
+        <!-- UPDATE STATUS -->
+
+        <db:update doc:name="Update Status"
+                   config-ref="MySQL_Config">
+
+            <db:sql><![CDATA[
+                UPDATE patients
+
+                SET
+                covid_status = :status,
+                discharge_date = CURDATE()
+
+                WHERE patient_id = :patientId
+            ]]></db:sql>
+
+            <db:input-parameters><![CDATA[
+                #[
+                  {
+                    status    : vars.statusData.covidStatus,
+                    patientId : vars.statusData.patientId
+                  }
+                ]
+            ]]></db:input-parameters>
+
+        </db:update>
+
+
+        <ee:transform doc:name="Update Response">
+
+            <ee:message>
+
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status : "SUCCESS",
+    message : "Patient Status Updated"
+}
+]]></ee:set-payload>
+
+            </ee:message>
+
+        </ee:transform>
+
+    </flow>
+
+
+    <!-- ========================================= -->
+    <!-- ADD VACCINATION -->
+    <!-- ========================================= -->
+
+    <flow name="vaccination-flow">
+
+        <http:listener
+                config-ref="HTTP_Listener_config"
+                path="/vaccinations/add"
+                allowedMethods="POST"/>
+
+        <logger level="INFO"
+                message="Vaccination Flow Started"/>
+
+        <set-variable variableName="vaccinationData"
+                      value="#[payload]"/>
+
+
+        <!-- INSERT VACCINATION -->
+
+        <db:insert doc:name="Insert Vaccination"
+                   config-ref="MySQL_Config">
+
+            <db:sql><![CDATA[
+                INSERT INTO vaccinations
+                (
+                    patient_id,
+                    vaccine_name,
+                    dose_number,
+                    vaccination_date
+                )
+
+                VALUES
+                (
+                    :patientId,
+                    :vaccineName,
+                    :doseNumber,
+                    CURDATE()
+                )
+            ]]></db:sql>
+
+            <db:input-parameters><![CDATA[
+                #[
+                  {
+                    patientId   : vars.vaccinationData.patientId,
+                    vaccineName : vars.vaccinationData.vaccineName,
+                    doseNumber  : vars.vaccinationData.doseNumber
+                  }
+                ]
+            ]]></db:input-parameters>
+
+        </db:insert>
+
+
+        <ee:transform doc:name="Vaccination Response">
+
+            <ee:message>
+
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status : "SUCCESS",
+    message : "Vaccination Added Successfully"
+}
+]]></ee:set-payload>
+
+            </ee:message>
+
+        </ee:transform>
+
+    </flow>
+
+
+    <!-- ========================================= -->
+    <!-- FETCH POSITIVE PATIENTS -->
+    <!-- ========================================= -->
+
+    <flow name="positive-patients-flow">
+
+        <http:listener
+                config-ref="HTTP_Listener_config"
+                path="/patients/positive"
+                allowedMethods="GET"/>
+
+        <logger level="INFO"
+                message="Fetching Positive Patients"/>
+
+
+        <db:select doc:name="Fetch Positive Patients"
+                   config-ref="MySQL_Config">
+
+            <db:sql><![CDATA[
+                SELECT
+                    patient_id,
+                    first_name,
+                    last_name,
+                    city,
+                    state,
+                    covid_status
+
+                FROM patients
+
+                WHERE covid_status = 'POSITIVE'
+            ]]></db:sql>
+
+        </db:select>
+
+
+        <ee:transform doc:name="Positive Response">
+
+            <ee:message>
+
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+payload
+]]></ee:set-payload>
+
+            </ee:message>
+
+        </ee:transform>
+
+    </flow>
+
+
+    <!-- ========================================= -->
+    <!-- VACCINATED POSITIVE REPORT -->
+    <!-- ========================================= -->
+
+    <flow name="vaccinated-positive-flow">
+
+        <http:listener
+                config-ref="HTTP_Listener_config"
+                path="/patients/vaccinated-positive"
+                allowedMethods="GET"/>
+
+        <logger level="INFO"
+                message="Vaccinated Positive Monitoring"/>
+
+
+        <db:select doc:name="Vaccinated Positive Patients"
+                   config-ref="MySQL_Config">
+
+            <db:sql><![CDATA[
+                SELECT
+
+                    p.patient_id,
+                    p.first_name,
+                    p.last_name,
+                    p.covid_status,
+
+                    v.vaccine_name,
+                    v.dose_number,
+                    v.vaccination_date
+
+                FROM patients p
+
+                JOIN vaccinations v
+                ON p.patient_id = v.patient_id
+
+                WHERE p.covid_status = 'POSITIVE'
+            ]]></db:sql>
+
+        </db:select>
+
+
+        <ee:transform doc:name="Vaccinated Response">
+
+            <ee:message>
+
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+payload
+]]></ee:set-payload>
+
+            </ee:message>
+
+        </ee:transform>
+
+    </flow>
+
+
+    <!-- ========================================= -->
+    <!-- HOSPITAL BED MONITORING -->
+    <!-- ========================================= -->
+
+    <flow name="hospital-monitoring-flow">
+
+        <http:listener
+                config-ref="HTTP_Listener_config"
+                path="/hospitals/beds"
+                allowedMethods="GET"/>
+
+        <logger level="INFO"
+                message="Hospital Bed Monitoring"/>
+
+
+        <db:select doc:name="Hospital Beds"
+                   config-ref="MySQL_Config">
+
+            <db:sql><![CDATA[
+                SELECT
+
+                    hospital_id,
+                    hospital_name,
+                    city,
+                    state,
+                    total_beds,
+                    available_beds
+
+                FROM hospitals
+
+                ORDER BY available_beds ASC
+            ]]></db:sql>
+
+        </db:select>
+
+
+        <ee:transform doc:name="Hospital Response">
+
+            <ee:message>
+
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+payload
+]]></ee:set-payload>
+
+            </ee:message>
+
+        </ee:transform>
+
+    </flow>
+
+
+    <!-- ========================================= -->
+    <!-- AUTO INVALID SCHEDULER -->
+    <!-- ========================================= -->
+
+    <flow name="invalidate-old-patients-flow">
+
+        <scheduler doc:name="Scheduler">
+
+            <scheduling-strategy>
+
+                <fixed-frequency
+                        frequency="1"
+                        timeUnit="DAYS"/>
+
+            </scheduling-strategy>
+
+        </scheduler>
+
+
+        <logger level="INFO"
+                message="Scheduler Started"/>
+
+
+        <db:update doc:name="Invalidate Old Patients"
+                   config-ref="MySQL_Config">
+
+            <db:sql><![CDATA[
+                UPDATE patients
+
+                SET covid_status = 'INVALID'
+
+                WHERE admission_date < CURDATE() - INTERVAL 20 DAY
+
+                AND covid_status = 'POSITIVE'
+            ]]></db:sql>
+
+        </db:update>
+
+
+        <logger level="INFO"
+                message="Scheduler Completed"/>
+
+    </flow>
+
+</mule>
